@@ -2,17 +2,15 @@
 import {
   effect,
   reactive,
+  ref,
+  toRef,
   readonly,
   shallowReactive,
 } from "./packages/reactive";
-const p = reactive(new Map([["key", 1]]));
-let p1 = new Map([["key", 1]]);
-effect(() => {
-  for (const v of p.values()) {
-    console.log(v);
-  }
-});
-p.set("key1", 2);
+const obj = reactive({ foo: 1, bar: 2 });
+const reffoo = toRef(obj, "foo");
+reffoo.value = 100;
+console.log(reffoo);
 // p.set("key2", 3);
 // arr[1] = "bar";
 // arr.length = 3;

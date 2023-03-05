@@ -6,6 +6,14 @@ const bucket = new WeakMap();
 // 存储被注册的副作用函数
 let activeEffect;
 const effectStack = [];
+const ITERATE_KEY = Symbol();
+const MAX_KEY_ITERATE_KEY = Symbol();
+// 触发的类型
+const TriggerType = {
+  SET: "SET",
+  ADD: "ADD",
+  DELETE: "DELETE",
+};
 export function effect(fn, options = {}) {
   function effectFn() {
     // 调用cleanup函数完成清除工作
@@ -45,13 +53,7 @@ function cleanup(effectFn) {
   // 最后需要重置effectFn.deps数组
   effectFn.deps.length = 0;
 }
-const ITERATE_KEY = Symbol();
-// 触发的类型
-const TriggerType = {
-  SET: "SET",
-  ADD: "ADD",
-  DELETE: "DELETE",
-};
+
 // 存储原始对象到代理对象的映射
 const reactiveMap = new Map();
 // 每次调用reactive时，都会创建新的代理对象
@@ -176,72 +178,77 @@ const mutableInstrumentations = {
       callBack.call(thisArg, warp(v), warp(k), this);
     });
   },
-  [Symbol.iterator]() {
-    const target = this.raw;
-    // 获取原始迭代器函数
-    const itr = target[Symbol.iterator]();
-    const warp = (val) =>
-      typeof val === "object" && val !== null ? reactive(val) : val;
-    track(target, ITERATE_KEY);
-    return {
-      next() {
-        const { value, done } = itr.next();
-        return {
-          value: value ? [warp(value[0]), warp(value[1])] : value,
-          done,
-        };
-      },
-      [Symbol.iterator]() {
-        return this;
-      },
-    };
-  },
-  entries() {
-    const target = this.raw;
-    const itr = target.entries();
-    const warp = (val) =>
-      typeof val === "object" && val !== null ? reactive(val) : val;
-    track(target, ITERATE_KEY);
-    return {
-      next() {
-        const { value, done } = itr.next();
-        return {
-          value: value ? [warp(value[0]), warp(value[1])] : value,
-          done,
-        };
-      },
-      [Symbol.iterator]() {
-        return this;
-      },
-    };
-  },
-  values() {
-    const target = this.raw;
-    const itr = target.values();
-    const warp = (val) =>
-      typeof val === "object" && val !== null ? reactive(val) : val;
-    track(target, ITERATE_KEY);
-    return {
-      next() {
-        const { value, done } = itr.next();
-        return {
-          value: value ? warp(value) : value,
-          done,
-        };
-      },
-      [Symbol.iterator]() {
-        return this;
-      },
-    };
-  },
+  [Symbol.iterator]: iterationMethod,
+  entries: iterationMethod,
+  values: valuesIterationMethod,
+  keys: keysIterationMethod,
 };
+
+function iterationMethod() {
+  const target = this.raw;
+  const itr = target[Symbol.iterator]();
+  const warp = (val) =>
+    typeof val === "object" && val !== null ? reactive(val) : val;
+  track(target, ITERATE_KEY);
+  return {
+    next() {
+      const { value, done } = itr.next();
+      return {
+        value: value ? [warp(value[0]), warp(value[1])] : value,
+        done,
+      };
+    },
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+
+function valuesIterationMethod() {
+  const target = this.raw;
+  const itr = target.values();
+  const warp = (val) =>
+    typeof val === "object" && val !== null ? reactive(val) : val;
+  track(target, ITERATE_KEY);
+  return {
+    next() {
+      const { value, done } = itr.next();
+      return {
+        value: value ? warp(value) : value,
+        done,
+      };
+    },
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+function keysIterationMethod() {
+  const target = this.raw;
+  const itr = target.keys();
+  const warp = (val) =>
+    typeof val === "object" && val !== null ? reactive(val) : val;
+  track(target, MAX_KEY_ITERATE_KEY);
+  return {
+    next() {
+      const { value, done } = itr.next();
+      return {
+        value: value ? warp(value) : value,
+        done,
+      };
+    },
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
 // isShallow，表示是否为浅响应，默认false，即非浅响应
 // isReadonly，表示是否为只读，默认false，即非只读
 export function createReactive(data, isShallow = false, isReadonly = false) {
   return new Proxy(data, {
     // 拦截读取操作,接收第三个参数receiver
     get(target, key, receiver) {
-      // console.log('get:',key);
+      console.log('get:',key);
       // 如果读取的是'size'属性，通过设置第三个参数的receiver为原始对象，从而解决问题
       // 代理对象可以使用raw属性访问原始数据
       if (key === "raw") {
@@ -270,6 +277,7 @@ export function createReactive(data, isShallow = false, isReadonly = false) {
         // 如果数据为只读，则调用readonly对值进行包装
         return isReadonly ? readonly(res) : reactive(res);
       }
+      return res
       // 返回定义在mutableInstrumentations对象下的方法
       return mutableInstrumentations[key];
     },
@@ -331,8 +339,43 @@ export function createReactive(data, isShallow = false, isReadonly = false) {
     },
   });
 }
+
+
+// 封装一个ref函数
+export function ref(val) {
+  // 在ref函数内部创建包裹对象
+  const wrapper ={
+    value:val
+  }
+  Object.defineProperty(wrapper,'__v_isRef',{
+    value:true
+  })
+  return reactive(wrapper)
+}
+export function toRef(obj,key) {
+  const wrapper = {
+    get value(){
+      return obj[key]
+    },
+    set value(val){
+      obj[key] = val
+    }
+  }
+  Object.defineProperty(wrapper,'__v_isRef',{
+    value:true
+  })
+  return wrapper
+}
+export function toRefs(obj) {
+  const ret = {}
+  for (const key in obj) {
+    ret[key] = toRef(obj,key)
+  }
+  return ret
+}
 // 在get拦截函数内调用tract函数追踪变化
 export function track(target, key) {
+  console.log('track',target, key);
   // 没有activeEffect,禁止跟踪时 直接返回
   if (!activeEffect || !shouldTrack) return target[key];
   // 根据target 从桶中取出depsMap , 它是个map类型，结构key--->effects
@@ -374,12 +417,27 @@ export function trigger(target, key, type, newVal) {
   if (
     type === TriggerType.ADD ||
     type === TriggerType.DELETE ||
+    // 即使是set类型操作，也会触发那些与ITERATE_KEY相关联的副作用函数重新执行
     (type === TriggerType.SET &&
       Object.prototype.toString.call(target) === "[object Map]")
   ) {
     // 获取与ITERATE_KEY相关的副作用函数，并执行
     const iterateEffects = depsMap.get(ITERATE_KEY);
     // 将与 ITERATE_KEY 相关的副作用函数添加到effectsToRun
+    iterateEffects &&
+      iterateEffects.forEach((effectFn) => {
+        if (effectFn != activeEffect) {
+          effectsToRun.add(effectFn);
+        }
+      });
+  }
+  if (
+    (type === TriggerType.ADD || type === TriggerType.DELETE) &&
+    Object.prototype.toString.call(target) === "[object Map]"
+  ) {
+    // 获取与MAX_KEY_ITERATE_KEY相关的副作用函数，并执行
+    const iterateEffects = depsMap.get(MAX_KEY_ITERATE_KEY);
+    // 将与 MAX_KEY_ITERATE_KEY 相关的副作用函数添加到effectsToRun
     iterateEffects &&
       iterateEffects.forEach((effectFn) => {
         if (effectFn != activeEffect) {
@@ -423,6 +481,8 @@ export function trigger(target, key, type, newVal) {
     }
   });
 }
+
+
 
 // 定义一个任务队列
 const jobQueue = new Set();
