@@ -248,7 +248,7 @@ export function createReactive(data, isShallow = false, isReadonly = false) {
   return new Proxy(data, {
     // 拦截读取操作,接收第三个参数receiver
     get(target, key, receiver) {
-      console.log('get:',key);
+      console.log("get:", key);
       // 如果读取的是'size'属性，通过设置第三个参数的receiver为原始对象，从而解决问题
       // 代理对象可以使用raw属性访问原始数据
       if (key === "raw") {
@@ -277,7 +277,7 @@ export function createReactive(data, isShallow = false, isReadonly = false) {
         // 如果数据为只读，则调用readonly对值进行包装
         return isReadonly ? readonly(res) : reactive(res);
       }
-      return res
+      return res;
       // 返回定义在mutableInstrumentations对象下的方法
       return mutableInstrumentations[key];
     },
@@ -340,42 +340,58 @@ export function createReactive(data, isShallow = false, isReadonly = false) {
   });
 }
 
-
 // 封装一个ref函数
 export function ref(val) {
   // 在ref函数内部创建包裹对象
-  const wrapper ={
-    value:val
-  }
-  Object.defineProperty(wrapper,'__v_isRef',{
-    value:true
-  })
-  return reactive(wrapper)
-}
-export function toRef(obj,key) {
   const wrapper = {
-    get value(){
-      return obj[key]
+    value: val,
+  };
+  Object.defineProperty(wrapper, "__v_isRef", {
+    value: true,
+  });
+  return reactive(wrapper);
+}
+export function toRef(obj, key) {
+  const wrapper = {
+    get value() {
+      return obj[key];
     },
-    set value(val){
-      obj[key] = val
-    }
-  }
-  Object.defineProperty(wrapper,'__v_isRef',{
-    value:true
-  })
-  return wrapper
+    set value(val) {
+      obj[key] = val;
+    },
+  };
+  Object.defineProperty(wrapper, "__v_isRef", {
+    value: true,
+  });
+  return wrapper;
 }
 export function toRefs(obj) {
-  const ret = {}
+  const ret = {};
   for (const key in obj) {
-    ret[key] = toRef(obj,key)
+    ret[key] = toRef(obj, key);
   }
-  return ret
+  return ret;
+}
+
+export function proxyRefs(target) {
+  return new Proxy(target, {
+    get(target, key, receiver) {
+      const value = Reflect.get(target, key, receiver);
+      return value.__v_isRef ? value.value : value;
+    },
+    set(target, key,newValue, receiver){
+      const value = target[key]
+      if(value.__v_isRef){
+        value.value = newValue
+        return true
+      }
+      return Reflect.set(target,key,newValue,receiver)
+    }
+  });
 }
 // 在get拦截函数内调用tract函数追踪变化
 export function track(target, key) {
-  console.log('track',target, key);
+  console.log("track", target, key);
   // 没有activeEffect,禁止跟踪时 直接返回
   if (!activeEffect || !shouldTrack) return target[key];
   // 根据target 从桶中取出depsMap , 它是个map类型，结构key--->effects
@@ -481,8 +497,6 @@ export function trigger(target, key, type, newVal) {
     }
   });
 }
-
-
 
 // 定义一个任务队列
 const jobQueue = new Set();
