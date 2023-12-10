@@ -74,8 +74,32 @@ const MyComponent = {
   },
 };
 
+const MyComponent2 = {
+  // 可选
+  name: "MyComponent2",
+  // 组件接收名为 title 的 props，并且该 props 的类型为 String
+  props: {
+    title: String,
+  },
+  // 组件的渲染函数，其返回值必须为虚拟 DOM
+  render() {
+    return {
+      type: "div",
+      children: `count2 is: ${this.title}`,
+    };
+  },
+  data() {
+    return {
+      foo: "hello world2",
+    };
+  },
+};
+
 const vnode = {
   type: MyComponent,
+  props: {
+    title: "www",
+  },
 };
 // const button = {
 //   type: "button",
@@ -191,7 +215,8 @@ const renderer = createRenderer({
 });
 renderer.render(vnode, el);
 // setTimeout(() => {
-//   renderer.render(newVNode, el);
+//   renderer.render(vnode1, el);
+//   //   renderer.render(newVNode, el);
 // }, 3000);
 // renderer.render(null, el);
 // function renderer(domstring, container) {

@@ -239,6 +239,7 @@ function createRenderer(options) {
     // 如果 n1 存在，则对比n1 和 n2 的类型
     if (n1 && n1.type !== n2.type) {
       // 如果新旧 vnode 类型不一样，则直接将旧 vnode 卸载
+      console.log(n1, n2);
       unmount(n1);
       n1 = null;
     }
@@ -294,6 +295,7 @@ function createRenderer(options) {
     const {
       render,
       data,
+      setup,
       props: propsOption,
       beforeCreate,
       created,
@@ -304,10 +306,10 @@ function createRenderer(options) {
     } = componentOptions;
     beforeCreate && beforeCreate();
     // 组件状态设置成响应式数据
-    const state = reactive(data());
+    const state = data ? reactive(data()) : null;
     // 调用 resolveProps 函数解析出最终的 props 数据与 attrs 数据
     const [props, attrs] = resolveProps(propsOption, vnode.props);
-
+    console.log(props, attrs);
     // 组件实例
     const instance = {
       // 组件自身的状态数据，即 data
@@ -319,38 +321,88 @@ function createRenderer(options) {
       // 组件所渲染的内容，即子树（subTree）
       subTree: null,
     };
+    const setupContext = { attrs };
+    let setupState = null;
+    const setupResult = setup(shallowReadonly(props), setupContext);
+    if (typeof setupResult === "function") {
+      if (render) console.error("setup返回渲染函数");
+      render = setupResult;
+    } else {
+      setupState = setupResult;
+    }
+    const renderContext = new Proxy(instance, {
+      get(t, k, r) {
+        const { state, props } = t;
+        if (state && k in state) {
+          return state[k];
+        } else if (k in props) {
+          return props[k];
+        } else if (setupState && k in setupState) {
+          return setupState[k];
+        } else {
+          console.error("不存在");
+        }
+      },
+      set(t, k, v, r) {
+        const { state, props } = t;
+        if (state && k in state) {
+          state[k] = v;
+        } else if (k in props) {
+          console.warn(`arrempting to mutate prop ${k}.props are readonly`);
+        } else if (setupState && k in setupState) {
+          setupState[k] = v;
+        } else {
+          console.error("不存在");
+        }
+      },
+    });
     // 将组件实例设置到 vnode 上，用于后续更新
     vnode.component = instance;
-    created && created();
+    created && created.call(renderContext);
 
     effect(
       () => {
         // 调用组件的渲染函数，获得子树
+        // 调用render函数时，将其this 设置为 state，从而render函数内部可以通过this访问组件自身状态数据
         const subTree = render.call(state, state);
         // 检查组件是否已经被挂载
-
         if (!instance.isMounted) {
-          beforeMount && beforeMount();
+          beforeMount && beforeMount().call(renderContext);
           // 初次挂载，调用 patch 函数第一个参数传递 null
           patch(null, subTree, container, anchor);
           // 重点：将组件实例的 isMounted 设置为 true，这样当更新发生时就不会再次进行挂载操作，
           // 而是会执行更新
           instance.isMounted = true;
-          mounted && mounted();
+          mounted && mounted().call(renderContext);
         } else {
-          beforeUpdate && beforeUpdate();
+          console.log(2);
+          beforeUpdate && beforeUpdate().call(renderContext);
           // 当 isMounted 为 true 时，说明组件已经被挂载，只需要完成自更新即可，
           // 所以在调用 patch 函数时，第一个参数为组件上一次渲染的子树，
           // 意思是，使用新的子树与上一次渲染的子树进行打补丁操作
           patch(instance.subTree, subTree, container, anchor);
-          updated && updated();
+          updated && updated().call(renderContext);
         }
         instance.subTree = subTree;
       },
       { scheduler: queueJob }
     );
   }
-  function patchComponent(params) {}
+  function patchComponent(n1, n2, anchor) {
+    const instance = (n2.component = n1.component);
+    const { props } = instance;
+    if (hasPropsChanged(n1.props, n2.props)) {
+      const [nextProps] = resolveProps(n2.type.props, n2.props);
+      for (const k in nextProps) {
+        props[k] = nextProps[k];
+      }
+      for (const k in props) {
+        if (!(k in nextProps)) {
+          delete props[k];
+        }
+      }
+    }
+  }
   // 卸载
   function unmount(vnode) {
     if (vnode.type === Fragment) {
@@ -466,5 +518,17 @@ function resolveProps(options, propsData) {
   }
   return [props, attrs];
 }
-
+function hasPropsChanged(preProps, nextProps) {
+  const nextKeys = Object.keys(nextProps);
+  if (nextKeys.length !== Object.keys(preProps).length) {
+    return true;
+  }
+  for (let i = 0; i < nextKeys.length; i++) {
+    const key = nextKeys[i];
+    if (nextProps[key] !== preProps[key]) {
+      return true;
+    }
+  }
+  return false;
+}
 export default createRenderer;
